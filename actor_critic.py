@@ -2,7 +2,7 @@ import os
 import gym
 import sys
 from gym_idsgame.agents.training_agents.policy_gradient.pg_agent_config import PolicyGradientAgentConfig
-from gym_idsgame.agents.training_agents.bayesian_methods.policy_gradient.actor_critic.bayes_actor_critic import BayesActorCriticAgent
+from gym_idsgame.agents.training_agents.policy_gradient.actor_critic.actor_critic import ActorCriticAgent
 from util import util
 
 def get_script_path():
@@ -43,7 +43,7 @@ if __name__ == '__main__':
 
     env_name = "idsgame-minimal_defense-v2"
     env = gym.make(env_name, save_dir=default_output_dir() + "/results/data/" + str(random_seed))
-    attacker_agent = BayesActorCriticAgent(env, pg_agent_config)
+    attacker_agent = ActorCriticAgent(env, pg_agent_config)
     attacker_agent.train()
     train_result = attacker_agent.train_result
     eval_result = attacker_agent.eval_result
