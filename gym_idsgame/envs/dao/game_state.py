@@ -304,6 +304,8 @@ class GameState():
         return min_ats
 
 
+
+
     def reconnaissance(self, node_id: int, attack_type: int, reconnaissance_reward : bool = False) -> int:
         """
         Performs a reconnaissance activity for the attacker

@@ -10,7 +10,6 @@ from torch.distributions import Categorical
 from torch.utils.tensorboard import SummaryWriter
 from gym_idsgame.envs.rendering.video.idsgame_monitor import IdsGameMonitor
 from gym_idsgame.envs.idsgame_env import IdsGameEnv
-#from gym_idsgame.envs.idsgame_env3 import IdsGameEnv
 from gym_idsgame.agents.dao.experiment_result import ExperimentResult
 from gym_idsgame.envs.constants import constants
 from gym_idsgame.agents.training_agents.models.fnn_w_softmax import FNNwithSoftmax

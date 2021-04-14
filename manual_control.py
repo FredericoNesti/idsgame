@@ -23,10 +23,10 @@ if __name__ == '__main__':
     # click SPACE to reset the game. If you
     versions = range(0, 20)
     random_seed = 0
-    version = versions[18]
+    version = versions[19]
     #env_name = "idsgame-random_attack-v" + str(version) # Play as Defender
-    env_name = "idsgame-maximal_attack-v" + str(version) # Play as Defender
-    # env_name = "idsgame-minimal_defense-v" + str(version) # Play as Attacker
+    #env_name = "idsgame-maximal_attack-v" + str(version) # Play as Defender
+    env_name = "idsgame-minimal_defense-v" + str(version) # Play as Attacker
     # env_name = "idsgame-random_defense-v" + str(version) # Play as Attacker
     env = gym.make(env_name)
     ManualDefenseAgent(env.idsgame_config)

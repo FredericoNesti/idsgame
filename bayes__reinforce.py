@@ -11,11 +11,11 @@ import json
 
 parser = argparse.ArgumentParser(description='Bayes version')
 
-parser.add_argument('--id_seed', type=int, default=1)
+parser.add_argument('--id_seed', type=int, default=5)
 
-parser.add_argument('--batchsize', type=int, default=2)
+parser.add_argument('--batchsize', type=int, default=10)
 parser.add_argument('--lr_decay_rate', type=float, default=0.999)
-parser.add_argument('--M', type=int, default=40)
+parser.add_argument('--M', type=int, default=5)
 parser.add_argument('--env_name', type=str, default="idsgame-random_attack-v0")
 
 parser.add_argument('--input_dim_attacker', type=int, default=33)
@@ -40,7 +40,7 @@ parser.add_argument('--static', type=bool, default=False)
 #parser.add_argument('--defender', type=bool, default=False)
 parser.add_argument('--attacker', type=bool, default=True)
 
-parser.add_argument('--gpu', type=bool, default=False)
+parser.add_argument('--gpu', type=bool, default=True)
 
 parser.add_argument('--nu', type=float, default=0.05)
 

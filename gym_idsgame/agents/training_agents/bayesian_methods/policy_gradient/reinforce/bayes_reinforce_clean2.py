@@ -31,6 +31,8 @@ import os.path
 #import skimage.data
 #import seaborn.apionly as sns
 
+import time
+
 #seed0 = 670979600
 #torch.manual_seed(seed0)
 
@@ -343,7 +345,7 @@ class BayesReinforceAgent(PolicyGradientAgent):
         if attacker:
             # ALTERNATIVE COMPUTATION OF GRADIENTS
 
-            Post_mean2 = torch.mean(torch.stack(Post_mean), 0)
+            Post_mean2 = torch.sum(torch.stack(Post_mean), 0)
             # print(Post_mean2)
 
             self.attacker_optimizer.zero_grad()
@@ -366,7 +368,7 @@ class BayesReinforceAgent(PolicyGradientAgent):
         else:
             # ALTERNATIVE COMPUTATION OF GRADIENTS
 
-            Post_mean2 = torch.mean(torch.stack(Post_mean), 0)
+            Post_mean2 = torch.sum(torch.stack(Post_mean), 0)
             # print(Post_mean2)
 
             self.defender_optimizer.zero_grad()
@@ -461,6 +463,15 @@ class BayesReinforceAgent(PolicyGradientAgent):
         # Training
         for iter in range(self.config.num_episodes):
 
+            saved_grads_batch = []
+            post_mean_batch = []
+
+            accumulate_time_bayesian = 0
+            accumulate_time_path = 0
+            accumulate_time_update = 0
+
+            start_episode = time.time()
+
             #if iter % 100 == 0:
             #    aux = self.config.batch_size*self.M*iter
             #    nu0 = np.maximum(torch.tensor(record_deltas[aux:]).mean().numpy() - 2*torch.tensor(record_deltas[aux:]).std().numpy(), nu_min)
@@ -480,8 +491,7 @@ class BayesReinforceAgent(PolicyGradientAgent):
 
 
 
-            saved_grads_batch = []
-            post_mean_batch = []
+
 
             # Batch
             for episode in range(self.config.batch_size):
@@ -502,6 +512,7 @@ class BayesReinforceAgent(PolicyGradientAgent):
 
                     saved_grads = []
 
+                    start_path = time.time()
                     while not done:
                         if self.config.render:
                             self.env.render(mode="human")
@@ -557,6 +568,11 @@ class BayesReinforceAgent(PolicyGradientAgent):
                         defender_state = self.update_state(defender_obs=defender_obs, attacker_obs=attacker_obs,
                                                            state=defender_state, attacker=False)
 
+                    end_path = time.time()
+
+                    accumulate_time_path += end_path - start_path
+
+                    #print('sampling path time required', end_path - start_path)
 
                     # Render final frame
                     if self.config.render:
@@ -574,6 +590,7 @@ class BayesReinforceAgent(PolicyGradientAgent):
                     #print('ATTACKER REWARDS')
                     #print(saved_attacker_rewards)
 
+                    start_bayesian = time.time()
                     ### First Dictionary Update
                     if flag0:
                         flag0 = False
@@ -631,6 +648,13 @@ class BayesReinforceAgent(PolicyGradientAgent):
 
                             saved_grads_batch.append(saved_grads)
 
+                    end_bayesian = time.time()
+
+                    accumulate_time_bayesian += end_bayesian - start_bayesian
+
+                    #print('time required bayesian', end_bayesian - start_bayesian)
+
+
                     # Record episode metrics
                     self.num_train_games += 1
                     self.num_train_games_total += 1
@@ -675,9 +699,17 @@ class BayesReinforceAgent(PolicyGradientAgent):
 
             # Perform Batch Policy Gradient updates
             if self.config.attacker:
+                start_updating = time.time()
+
                 #loss = self.training_step(saved_attacker_rewards_batch, saved_attacker_log_probs_batch, attacker=True)
                 loss = self.training_step(Post_mean=post_mean_batch, R=saved_attacker_rewards_batch, attacker=True, lr=lr_attacker, Fisher_inv=Ginv, log_probs=saved_attacker_log_probs_batch)
                 episode_attacker_loss += loss.item()
+
+                end_updating = time.time()
+
+                accumulate_time_update += end_updating - start_updating
+
+                #rint('time required updating', end_updating - start_updating)
 
             if self.config.defender:
                 #loss = self.training_step(saved_attacker_rewards_batch, saved_attacker_log_probs_batch, attacker=True)
@@ -774,6 +806,16 @@ class BayesReinforceAgent(PolicyGradientAgent):
             # Anneal epsilon linearly
             self.anneal_epsilon()
 
+            end_episode = time.time()
+
+            print('')
+            print('1 episode time required', end_episode - start_episode)
+            print('1 episode time accum update', accumulate_time_update)
+            print('1 episode time accum path', accumulate_time_path)
+            print('1 episode time accum bayesian', accumulate_time_bayesian)
+            print('residual', end_episode - start_episode - accumulate_time_update - accumulate_time_path -  accumulate_time_bayesian)
+            print('')
+
         self.config.logger.info("Training Complete")
 
         # Final evaluation (for saving Gifs etc)
@@ -789,6 +831,9 @@ class BayesReinforceAgent(PolicyGradientAgent):
             time_str = str(time.time())
             self.train_result.to_csv(self.config.save_dir + "/" + time_str + "_train_results_checkpoint.csv")
             self.eval_result.to_csv(self.config.save_dir + "/" + time_str + "_eval_results_checkpoint.csv")
+
+
+
 
         return self.train_result
 

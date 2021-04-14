@@ -140,10 +140,10 @@ class ReinforceAgent(PolicyGradientAgent):
             returns = torch.tensor(returns, dtype=torch.float)
 
             # normalize
-            #std = returns.std()
+            std = returns.std()
             if num_rewards < 2:
                 std = 0
-            returns = (returns - returns.mean()) # / (std + self.machine_eps)
+            returns = (returns - returns.mean())  / (std + self.machine_eps)
 
             # Compute PG "loss" which in reality is the expected reward, which we want to maximize with gradient ascent
             for log_prob, R in zip(saved_log_probs[batch], returns):
@@ -263,6 +263,10 @@ class ReinforceAgent(PolicyGradientAgent):
 
 
     def train(self) -> ExperimentResult:
+
+        #record time for computing for whole train
+        training_time_start = time.time()
+
         """
         Runs the REINFORCE algorithm
 
@@ -297,8 +301,14 @@ class ReinforceAgent(PolicyGradientAgent):
         saved_defender_log_probs_batch = []
         saved_defender_rewards_batch = []
 
+
+
         # Training
         for iter in range(self.config.num_episodes):
+
+
+            episode_time_start = time.time()
+
 
             # Batch
             for episode in range(self.config.batch_size):
@@ -486,6 +496,13 @@ class ReinforceAgent(PolicyGradientAgent):
 
             # Anneal epsilon linearly
             self.anneal_epsilon()
+
+            episode_time_end = time.time()
+
+            self.tensorboard_writer.add_scalar('work_time/train/', episode_time_end - episode_time_start, iter)
+            self.tensorboard_writer.add_scalar('cumulative_work_time/train/', time.time() - training_time_start, iter)
+
+
 
         self.config.logger.info("Training Complete")
 

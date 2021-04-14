@@ -26,6 +26,8 @@ from scipy.sparse import csc_matrix
 from scipy.sparse.linalg import inv as sinv
 import numpy as np
 
+import timeit
+
 
 #seed0 = 670979600
 #torch.manual_seed(seed0)
@@ -407,6 +409,9 @@ class BayesReinforceAgent(PolicyGradientAgent):
 
                 saved_grads = []
 
+
+
+                start_path = timeit.timeit()
                 while not done:
                     if self.config.render:
                         self.env.render(mode="human")
@@ -467,6 +472,9 @@ class BayesReinforceAgent(PolicyGradientAgent):
                     defender_state = self.update_state(defender_obs=defender_obs, attacker_obs=attacker_obs,
                                                        state=defender_state, attacker=False)
 
+                end_path = timeit.timeit()
+
+                print('sampling path time required', start_path - end_path)
 
                 # Render final frame
                 if self.config.render:
@@ -496,9 +504,7 @@ class BayesReinforceAgent(PolicyGradientAgent):
                 #Ginv = torch.pinverse(Fisher)
                 #print('check Ginv', Ginv)
 
-
-
-
+                start_bayesian = timeit.timeit()
                 ### First Dictionary Update
                 if flag0:
                     flag0 = False
@@ -563,8 +569,9 @@ class BayesReinforceAgent(PolicyGradientAgent):
                         #Ginv = (1 / (1 - 1 / m)) * (Ginv - (1 / m) * (
                         #            (Ginv @ uzm @ (Ginv @ uzm).T) / (1 - (1 / m) + (1 / m) * uzm.T @ Ginv @ uzm)))
 
+                end_bayesian = timeit.timeit()
 
-
+                print('time required bayesian', start_bayesian - end_bayesian)
 
 
 
@@ -621,9 +628,16 @@ class BayesReinforceAgent(PolicyGradientAgent):
 
             # Perform Batch Policy Gradient updates
             if self.config.attacker:
+
+                start_updating = timeit.timeit()
+
                 #loss = self.training_step(saved_attacker_rewards_batch, saved_attacker_log_probs_batch, attacker=True)
                 loss = self.training_step(Post_mean=Post_mean, R=saved_attacker_rewards_batch, attacker=True, lr=lr_attacker, Fisher_inv=Ginv, log_probs=saved_attacker_log_probs_batch)
                 episode_attacker_loss += loss.item()
+
+                end_updating = timeit.timeit()
+
+                print('time required updating', start_updating - end_updating)
 
             if self.config.defender:
                 #loss = self.training_step(saved_defender_rewards_batch, saved_defender_log_probs_batch, attacker=False)

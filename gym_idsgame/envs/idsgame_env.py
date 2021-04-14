@@ -327,6 +327,11 @@ class IdsGameEnv(gym.Env, ABC):
 
     # -------- API ------------
     def step(self, action: int) -> Union[np.ndarray, int, bool, dict]:
+
+        #print('')
+        #print('reconnaissance')
+        #print(self.past_reconnaissance_activities)
+
         """
         Takes a step in the environment using the given action.
 
@@ -459,16 +464,37 @@ class IdsGameEnv(gym.Env, ABC):
         return observation, reward, self.state.done, info
 
 
+    # -------- PRIORS ------------
+    def rec_prior_1(self):
+        '''
+        reconnaissance prior
+        '''
+        target_node_id, attack_type = self.past_reconnaissance_activities[-1]
+        attack_row, attack_col = self.state.attacker_pos
+        row_ids = self.idsgame_config.game_config.network_config.get_row_ids(attack_row)
+
+        min_ats = self.state.min_attack_type(target_node_id, row_ids)
+
+        reward = 1 - min_ats[0]/10
+        norm_factor = self.state.game_step if self.state.game_step > 0 else 1
+        reward /= norm_factor
+
+        return reward
+
+    def random_prior(self):
+        return torch.rand(1)
+
     # This step function is for the definition of the prior
     def prior(self, action):
+        '''
+        No Reconnaissance
+        '''
 
         target_node_id, target_pos, attack_type, reconnaissance = self.get_attacker_action(action)
         attack_row, attack_col = self.state.attacker_pos
         row_ids = self.idsgame_config.game_config.network_config.get_row_ids(attack_row)
         min_ats = self.state.min_attack_type(target_node_id, row_ids)
 
-        #print('row_ids', row_ids)
-        #print('min_ats', min_ats)
 
         reward = 0
         if min_ats != []:
@@ -484,6 +510,9 @@ class IdsGameEnv(gym.Env, ABC):
         return reward
 
     def prior2(self, action):
+        '''
+        No Reconnaissance
+        '''
 
         target_node_id, target_pos, attack_type, reconnaissance = self.get_attacker_action(action)
         attack_row, attack_col = self.state.attacker_pos
@@ -505,6 +534,11 @@ class IdsGameEnv(gym.Env, ABC):
             reward /= norm_factor
 
         return reward
+
+    # end priors
+
+
+
 
 
 
