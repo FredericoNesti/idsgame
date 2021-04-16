@@ -65,7 +65,7 @@ def default_output_dir() -> str:
 if __name__ == '__main__':
     random_seed = args.id_seed
 
-    with open(default_output_dir() + "/results/" + str(random_seed) + "_args.txt", 'w') as f:
+    with open(default_output_dir() + "/results/" + args.experiment_id + "_args.txt", 'w') as f:
         json.dump(args.__dict__, f, indent=2)
 
     util.create_artefact_dirs(default_output_dir(), random_seed)
@@ -76,15 +76,15 @@ if __name__ == '__main__':
                                                 eval_sleep=0.9,
                                                 min_epsilon=0.01, eval_episodes=args.eval_episodes, train_log_frequency=args.train_log_frequency,
                                                 epsilon_decay=0., video=False, eval_log_frequency=args.eval_log_frequency,
-                                                video_fps=5, video_dir=default_output_dir() + "/results/videos/" + str(random_seed),
+                                                video_fps=5, video_dir=default_output_dir() + "/results/videos/" + args.experiment_id,
                                                 num_episodes=args.num_episodes,
                                                 eval_render=False, gifs=True,
-                                                gif_dir=default_output_dir() + "/results/gifs/" + str(random_seed),
+                                                gif_dir=default_output_dir() + "/results/gifs/" + args.experiment_id,
                                                 eval_frequency=args.eval_frequency,
                                                 attacker=args.attacker,
                                                 #defender=args.defender,
                                                 video_frequency=101,
-                                                save_dir=default_output_dir() + "/results/data/" + str(random_seed),
+                                                save_dir=default_output_dir() + "/results/data/" + args.experiment_id,
                                                 checkpoint_freq=5000,
                                                 input_dim_attacker=args.input_dim_attacker,
                                                 output_dim_attacker=args.output_dim_attacker,
@@ -93,11 +93,11 @@ if __name__ == '__main__':
                                                 hidden_dim=64,
                                                 num_hidden_layers=1, batch_size=args.batchsize,
                                                 gpu=args.gpu, tensorboard=True,
-                                                tensorboard_dir=default_output_dir() + "/results/tensorboard/" + str(random_seed),
+                                                tensorboard_dir=default_output_dir() + "/results/tensorboard/" + args.experiment_id,
                                                 optimizer="Adam", lr_exp_decay=True, lr_decay_rate=args.lr_decay_rate
                                                 )
     env_name = args.env_name
-    env = gym.make(env_name, save_dir=default_output_dir() + "/results/data/" + str(random_seed))
+    env = gym.make(env_name, save_dir=default_output_dir() + "/results/data/" + args.experiment_id)
     attacker_agent = BayesReinforceAgent(M=args.M, risk_averse=args.risk_averse, nu=args.nu, static=args.static, env=env, config=pg_agent_config)
     attacker_agent.train()
     train_result = attacker_agent.train_result

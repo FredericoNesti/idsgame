@@ -303,6 +303,23 @@ class GameState():
                 min_ats.append(at)
         return min_ats
 
+    def min_attack_values(self, node, row_ids):
+        min_val = float('inf')
+        for n in row_ids:
+            for at in range(self.attack_values.shape[1]):
+                val = self.attack_values[n][at]
+                if val <= min_val:
+                    min_val = val
+        min_ats = []
+        for at in range(self.attack_values.shape[1]):
+            val = self.attack_values[node][at]
+            if val <= min_val:
+                min_ats.append(at)
+        return min_ats
+
+
+
+
 
 
 

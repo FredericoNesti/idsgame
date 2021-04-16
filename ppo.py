@@ -6,6 +6,26 @@ from gym_idsgame.agents.training_agents.openai_baselines.ppo.ppo import OpenAiPP
 from gym_idsgame.agents.training_agents.openai_baselines.common.baseline_env_wrapper import BaselineEnvWrapper
 from util import util
 
+import argparse
+import json
+
+parser = argparse.ArgumentParser(description='')
+
+parser.add_argument('--experiment_id', type=str, default="PPO.0.MinDef19.1000.00.123456789")
+parser.add_argument('--seed', type=int, default=123456789)
+
+parser.add_argument('--num_episodes', type=int, default=100001)
+parser.add_argument('--eval_frequency', type=int, default=1000)
+parser.add_argument('--train_log_frequency', type=int, default=100)
+parser.add_argument('--eval_log_frequency', type=int, default=1000)
+
+parser.add_argument('--defender', type=bool, default=False)
+parser.add_argument('--attacker', type=bool, default=True)
+
+args = parser.parse_args()
+
+
+
 def get_script_path():
     """
     :return: the script path
@@ -21,20 +41,24 @@ def default_output_dir() -> str:
 
 # Program entrypoint
 if __name__ == '__main__':
-    random_seed = 0
-    util.create_artefact_dirs(default_output_dir(), random_seed)
+    random_seed = args.seed
+    
+    with open(default_output_dir() + "/results/" + args.experiment_id + "_args.txt", 'w') as f:
+        json.dump(args.__dict__, f, indent=2)
+    
+    util.create_artefact_dirs(default_output_dir(), args.experiment_id)
     pg_agent_config = PolicyGradientAgentConfig(gamma=1, alpha_attacker=0.0001, epsilon=1, render=False,
                                                 alpha_defender=0.0001,
                                                 eval_sleep=0.9,
-                                                min_epsilon=0.01, eval_episodes=1000, train_log_frequency=1,
-                                                epsilon_decay=0.9999, video=True, eval_log_frequency=500,
+                                                min_epsilon=0.01, eval_episodes=1000, train_log_frequency=args.train_log_frequency,
+                                                epsilon_decay=0.9999, video=False, eval_log_frequency=args.eval_log_frequency,
                                                 video_fps=5, video_dir=default_output_dir() + "/results/videos",
-                                                num_episodes=100000000,
-                                                eval_render=False, gifs=True,
-                                                gif_dir=default_output_dir() + "/results/gifs/" + str(random_seed),
-                                                eval_frequency=55000, attacker=True, defender=False,
+                                                num_episodes=args.num_episodes,
+                                                eval_render=False, gifs=False,
+                                                gif_dir=default_output_dir() + "/results/gifs/" + args.experiment_id,
+                                                eval_frequency=args.eval_frequency, attacker=args.attacker, defender=args.defender,
                                                 video_frequency=1001,
-                                                save_dir=default_output_dir() + "/results/data/" + str(random_seed),
+                                                save_dir=default_output_dir() + "/results/data/" + args.experiment_id,
                                                 checkpoint_freq=250,
                                                 input_dim_attacker=((4 + 2) * 4),
                                                 output_dim_attacker=(4 + 1) * 4,
@@ -45,7 +69,7 @@ if __name__ == '__main__':
                                                 vf_hidden_dim=128,
                                                 batch_size=2000,
                                                 gpu=False, tensorboard=True,
-                                                tensorboard_dir=default_output_dir() + "/results/tensorboard/" + str(random_seed),
+                                                tensorboard_dir=default_output_dir() + "/results/tensorboard/" + args.experiment_id,
                                                 optimizer="Adam", lr_exp_decay=False, lr_decay_rate=0.999,
                                                 state_length=1, normalize_features=False, merged_ad_features=True,
                                                 zero_mean_features=False, gpu_id=0, lstm_network=False,
@@ -67,7 +91,7 @@ if __name__ == '__main__':
                                                 attacker_node_net_output_dim=4)
     env_name = "idsgame-minimal_defense-v19"
     wrapper_env = BaselineEnvWrapper(env_name, idsgame_config=None,
-                                     save_dir=default_output_dir() + "/results/data/" + str(random_seed),
+                                     save_dir=default_output_dir() + "/results/data/" + args.experiment_id,
                                      pg_agent_config=pg_agent_config)
     attacker_agent = OpenAiPPOAgent(wrapper_env, pg_agent_config)
 

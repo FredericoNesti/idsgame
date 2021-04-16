@@ -17,6 +17,9 @@ from gym_idsgame.envs.dao.idsgame_config import IdsGameConfig
 from gym_idsgame.envs.dao.network_config import NetworkConfig
 from gym_idsgame.envs.constants import constants
 #import gym_idsgame.envs.util.idsgame_util as util
+from collections import Counter
+
+import torch
 
 
 '''
@@ -463,26 +466,217 @@ class IdsGameEnv(gym.Env, ABC):
             self.game_trajectories.append(trajectory)
         return observation, reward, self.state.done, info
 
+    # -------- functions for reconstituting nodes actions -------
+
+    def reconstitute_from_reconnaissance(self, node):
+
+        defense_node = {}
+        for i in range(10):
+            defense_node[i] = 0
+
+        for r_node, r_type in self.past_reconnaissance_activities:
+            if r_node == node:
+                if r_type in defense_node:
+                    defense_node[r_type] += 1
+                else:
+                    defense_node[r_type] = 1
+        return defense_node
+
+    def reconstitute_from_attacker(self, node):
+
+        defense_node = {}
+        for i in range(10):
+            defense_node[i] = 0
+
+        for r_node, r_type in self.past_positions:
+            if r_node == node:
+                if r_type in defense_node:
+                    defense_node[r_type] += 1
+                else:
+                    defense_node[r_type] = 1
+        return defense_node
+
+
+    # end functions for reconnaissance
+
+
 
     # -------- PRIORS ------------
-    def rec_prior_1(self):
+
+    def rec_mindist_prior_2(self, action):
         '''
         reconnaissance prior
         '''
-        target_node_id, attack_type = self.past_reconnaissance_activities[-1]
+
+        target_node_id, target_pos, attack_type, reconnaissance = self.get_attacker_action(action)
+        d = self.reconstitute_from_reconnaissance(target_node_id)
+        d1 = self.reconstitute_from_attacker(target_node_id)
+
+
+        if d == {}:
+
+            #print(d1)
+
+            #reward = torch.Tensor([max(d1.items(), key=lambda x: x[1])[1] / 10])
+            #norm_factor = self.state.game_step if self.state.game_step > 0 else 1
+            #reward /= norm_factor
+
+            target_node_id, target_pos, attack_type, reconnaissance = self.get_attacker_action(action)
+            attack_row, attack_col = self.state.attacker_pos
+            row_ids = self.idsgame_config.game_config.network_config.get_row_ids(attack_row)
+            min_ats = self.state.min_attack_type(target_node_id, row_ids)
+
+            reward = 0
+            if min_ats != []:
+                reward_num = 0
+                reward_denom = 0
+                for i in min_ats:
+                    reward_num += i
+                    reward_denom += 10
+                reward += reward_num / reward_denom
+                norm_factor = self.state.game_step if self.state.game_step > 0 else 1
+                reward /= norm_factor
+                reward = torch.Tensor([reward])
+
+        else:
+
+            #print(d1)
+            #print(d)
+
+            #x = Counter(d)
+            #x1 = Counter(d1)
+            #res = x - x1
+
+            res = {key: d[key] - d1.get(key, 0) for key in d.keys()}
+
+            aux = torch.Tensor([max(res.items(), key=lambda x: abs(x[1]))[1] / 10])
+
+            reward = torch.exp(-aux**2)
+            norm_factor = self.state.game_step if self.state.game_step > 0 else 1
+            reward /= norm_factor
+
+        return torch.Tensor([reward])
+
+
+
+
+
+
+
+    def rec_mindist_prior(self, action):
+        '''
+        reconnaissance prior - not working
+        '''
+
+        if self.past_reconnaissance_activities != []:
+            target_node_id_rec, attack_type = self.past_reconnaissance_activities[-1]
+        else:
+            target_node_id_rec, target_pos, attack_type, reconnaissance = self.get_attacker_action(action)
+
+
+        target_node_id, target_pos, attack_type, reconnaissance = self.get_attacker_action(action)
         attack_row, attack_col = self.state.attacker_pos
         row_ids = self.idsgame_config.game_config.network_config.get_row_ids(attack_row)
 
-        min_ats = self.state.min_attack_type(target_node_id, row_ids)
+        min_ats = self.state.min_attack_type(target_node_id_rec, row_ids)
 
-        reward = 1 - min_ats[0]/10
+        values_ats = self.state.min_attack_type(target_node_id, row_ids)
+
+        #printting somehting here to debug
+        print('kjg')
+        print(min_ats)
+        print(values_ats)
+
+        reward = torch.sum(torch.exp(-(torch.Tensor(min_ats)-torch.Tensor(values_ats))**2))
         norm_factor = self.state.game_step if self.state.game_step > 0 else 1
         reward /= norm_factor
 
         return reward
 
+    def rec_prior_2(self, action):
+        '''
+        reconnaissance prior - working
+        '''
+        target_node_id, target_pos, attack_type, reconnaissance = self.get_attacker_action(action)
+        d = self.reconstitute_from_reconnaissance(target_node_id)
+        if d == {}:
+            target_node_id, target_pos, attack_type, reconnaissance = self.get_attacker_action(action)
+            attack_row, attack_col = self.state.attacker_pos
+            row_ids = self.idsgame_config.game_config.network_config.get_row_ids(attack_row)
+            min_ats = self.state.min_attack_type(target_node_id, row_ids)
+
+            reward = 0
+            if min_ats != []:
+                reward_num = 0
+                reward_denom = 0
+                for i in min_ats:
+                    reward_num += i
+                    reward_denom += 10
+                reward += reward_num / reward_denom
+                norm_factor = self.state.game_step if self.state.game_step > 0 else 1
+                reward /= norm_factor
+        else:
+            reward = 1 - min(d.items(), key=lambda x: x[1])[1]/10
+            norm_factor = self.state.game_step if self.state.game_step > 0 else 1
+            reward /= norm_factor
+        return torch.Tensor([reward])
+
+    def rec_prior_1(self, action):
+        '''
+        reconnaissance prior - not working
+        '''
+        #print(self.past_reconnaissance_activities)
+        if self.past_reconnaissance_activities != []:
+
+            target_node_id, attack_type = self.past_reconnaissance_activities[-1]
+            attack_row, attack_col = self.state.attacker_pos
+            row_ids = self.idsgame_config.game_config.network_config.get_row_ids(attack_row)
+            min_ats = self.state.min_attack_type(target_node_id, row_ids)
+            #min_ats = self.state.min_attack_values(target_node_id, row_ids)
+
+            #print(min_ats)
+            '''
+            if min_ats != []:
+                reward = 1 - min_ats[0] / 10
+                norm_factor = self.state.game_step if self.state.game_step > 0 else 1
+                reward /= norm_factor
+            else:
+                reward = 0
+            '''
+
+            reward = 0
+            if min_ats != []:
+                reward_num = 0
+                reward_denom = 0
+                for i in min_ats:
+                    reward_num += 10 - i
+                    reward_denom += 10
+                reward += reward_num / reward_denom
+                norm_factor = self.state.game_step if self.state.game_step > 0 else 1
+                reward /= norm_factor
+        else:
+            target_node_id, target_pos, attack_type, reconnaissance = self.get_attacker_action(action)
+            attack_row, attack_col = self.state.attacker_pos
+            row_ids = self.idsgame_config.game_config.network_config.get_row_ids(attack_row)
+            min_ats = self.state.min_attack_type(target_node_id, row_ids)
+
+            reward = 0
+            if min_ats != []:
+                reward_num = 0
+                reward_denom = 0
+                for i in min_ats:
+                    reward_num += i
+                    reward_denom += 10
+                reward += reward_num / reward_denom
+                norm_factor = self.state.game_step if self.state.game_step > 0 else 1
+                reward /= norm_factor
+
+        return torch.Tensor([reward])
+
     def random_prior(self):
-        return torch.rand(1)
+        #return torch.rand(1)
+        return torch.Tensor([0.0])
+
 
     # This step function is for the definition of the prior
     def prior(self, action):

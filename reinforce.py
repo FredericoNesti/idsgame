@@ -23,9 +23,13 @@ parser.add_argument('--input_dim_attacker', type=int, default=40)
 parser.add_argument('--output_dim_attacker', type=int, default=44)
 #parser.add_argument('--input_dim_defender', type=int, default=44)
 #parser.add_argument('--output_dim_defender', type=int, default=44)
+
+
 parser.add_argument('--alpha_attacker', type=float, default=0.0001)
 parser.add_argument('--alpha_defender', type=float, default=0.0001)
 parser.add_argument('--eval_episodes', type=int, default=100)
+
+
 parser.add_argument('--num_episodes', type=int, default=100001)
 parser.add_argument('--eval_frequency', type=int, default=1000)
 parser.add_argument('--train_log_frequency', type=int, default=100)
@@ -64,10 +68,10 @@ def default_output_dir() -> str:
 if __name__ == '__main__':
     random_seed = args.seed
 
-    with open(default_output_dir() + "/results/" + str(random_seed) + "_args.txt", 'w') as f:
+    with open(default_output_dir() + "/results/" + args.experiment_id + "_args.txt", 'w') as f:
         json.dump(args.__dict__, f, indent=2)
 
-    util.create_artefact_dirs(default_output_dir(), random_seed)
+    util.create_artefact_dirs(default_output_dir(), args.experiment_id)
     # these parameter are changed
     '''
     pg_agent_config = PolicyGradientAgentConfig(gamma=args.discount_factor,
@@ -105,10 +109,10 @@ if __name__ == '__main__':
                                                 video_fps=5, video_dir=default_output_dir() + "/results/videos",
                                                 num_episodes=args.num_episodes,
                                                 eval_render=False, gifs=False,
-                                                gif_dir=default_output_dir() + "/results/gifs/" + str(random_seed),
+                                                gif_dir=default_output_dir() + "/results/gifs/" + args.experiment_id,
                                                 eval_frequency=args.eval_frequency, attacker=args.attacker, defender=args.defender,
                                                 video_frequency=1001,
-                                                save_dir=default_output_dir() + "/results/data/" + str(random_seed),
+                                                save_dir=default_output_dir() + "/results/data/" + args.experiment_id,
                                                 checkpoint_freq=500,
                                                 input_dim_attacker=((4 + 2) * 4),
                                                 output_dim_attacker=(4 + 1) * 4,
@@ -119,7 +123,7 @@ if __name__ == '__main__':
                                                 vf_hidden_dim=128,
                                                 batch_size=args.batchsize,
                                                 gpu=args.gpu, tensorboard=True,
-                                                tensorboard_dir=default_output_dir() + "/results/tensorboard/" + str(random_seed),
+                                                tensorboard_dir=default_output_dir() + "/results/tensorboard/" + args.experiment_id,
                                                 optimizer="Adam", lr_exp_decay=args.lr_exp_decay, lr_decay_rate=args.lr_decay_rate,
                                                 state_length=1, normalize_features=False, merged_ad_features=True,
                                                 zero_mean_features=False, gpu_id=0,
@@ -142,7 +146,7 @@ if __name__ == '__main__':
                                                 attacker_node_net_output_dim=4)
 
     env_name = args.env_name
-    env = gym.make(env_name, save_dir=default_output_dir() + "/results/data/" + str(random_seed))
+    env = gym.make(env_name, save_dir=default_output_dir() + "/results/data/" + args.experiment_id)
     attacker_agent = ReinforceAgent(env=env, config=pg_agent_config)
     attacker_agent.train()
     train_result = attacker_agent.train_result

@@ -23,7 +23,7 @@ from torch.autograd.functional import hessian
 from torch.autograd.functional import jacobian
 import numpy as np
 import tensorflow as tf
-#   import tfplot
+#import tfplot
 import numpy as np
 import os.path
 #import scipy.misc
@@ -38,7 +38,17 @@ class BayesReinforceAgent(PolicyGradientAgent):
     """
     An implementation of the REINFORCE Policy Gradient algorithm
     """
-    def __init__(self, prior_state:bool, prior_type:int, M:int, env:IdsGameEnv, config: PolicyGradientAgentConfig):
+    def __init__(self, prior_state:bool,
+                 prior_type       :int,
+                 GP_type          :str,
+                 measure_noise_var:float,
+                 kernel_type      :str,
+                 kernel_var       :float,
+                 heuristic_warmup :int,
+                 nu:float, nu_min :float,
+                 entropy_reg      :float,
+                 M                :int,
+                 env:IdsGameEnv, config:PolicyGradientAgentConfig):
         """
         Initialize environment and hyperparameters
 
@@ -47,24 +57,37 @@ class BayesReinforceAgent(PolicyGradientAgent):
         super(BayesReinforceAgent, self).__init__(env, config)
         self.attacker_policy_network = None
         self.defender_policy_network = None
-        self.loss_fn = None
-        self.attacker_optimizer = None
-        self.defender_optimizer = None
-        self.attacker_lr_decay = None
-        self.defender_lr_decay = None
-        self.tensorboard_writer = SummaryWriter(self.config.tensorboard_dir)
+        self.loss_fn                 = None
+        self.attacker_optimizer      = None
+        self.defender_optimizer      = None
+        self.attacker_lr_decay       = None
+        self.defender_lr_decay       = None
+        self.tensorboard_writer      = SummaryWriter(self.config.tensorboard_dir)
+
         self.initialize_models()
         self.tensorboard_writer.add_hparams(self.config.hparams_dict(), {})
-        self.machine_eps = np.finfo(np.float32).eps.item()
+
+        self.machine_eps                          = np.finfo(np.float32).eps.item()
         self.env.idsgame_config.save_trajectories = False
         self.env.idsgame_config.save_attack_stats = False
+
         if torch.cuda.is_available() and self.config.gpu:
-            device = torch.device("cuda:" + str(self.config.gpu_id))
-            self.device = device
+            device       = torch.device("cuda:" + str(self.config.gpu_id))
+            self.device  = device
 
         self.prior_state = prior_state
-        self.prior_type = prior_type
-        self.M = M
+        self.prior_type  = prior_type
+        self.M           = M
+        self.entropy_reg = entropy_reg
+
+        self.GP_type           = GP_type
+        self.kernel_type       = kernel_type
+        self.kernel_var        = kernel_var
+        self.heuristic_warmup  = heuristic_warmup
+        self.nu                = nu
+        self.nu_min            = nu_min
+        self.measure_noise_var = measure_noise_var
+
 
 
     def initialize_models(self) -> None:
@@ -125,10 +148,12 @@ class BayesReinforceAgent(PolicyGradientAgent):
 
         # LR decay
         if self.config.lr_exp_decay:
-            self.attacker_lr_decay = torch.optim.lr_scheduler.ExponentialLR(optimizer=self.attacker_optimizer,
+            self.attacker_lr_decay  = torch.optim.lr_scheduler.ExponentialLR(optimizer=self.attacker_optimizer,
                                                                        gamma=self.config.lr_decay_rate)
-            self.defender_lr_decay = torch.optim.lr_scheduler.ExponentialLR(optimizer=self.attacker_optimizer,
+            self.defender_lr_decay  = torch.optim.lr_scheduler.ExponentialLR(optimizer=self.attacker_optimizer,
                                                                             gamma=self.config.lr_decay_rate)
+
+
 
 
 
@@ -164,12 +189,12 @@ class BayesReinforceAgent(PolicyGradientAgent):
             legal_actions = list(filter(lambda action: self.env.is_defense_legal(action), actions))
             non_legal_actions = list(filter(lambda action: not self.env.is_defense_legal(action), actions))
 
+        if (np.random.rand() < self.config.epsilon and not eval) \
+                or (eval and np.random.random() < self.config.eval_epsilon):
+            return np.random.choice(legal_actions)
+
         # Forward pass using the current policy network to predict P(a|s)
         if attacker:
-
-            #print('')
-            #print('state', state)
-
             action_probs = self.attacker_policy_network(state).squeeze()
             # Set probability of non-legal actions to 0
             action_probs_1 = action_probs.clone()
@@ -179,8 +204,6 @@ class BayesReinforceAgent(PolicyGradientAgent):
             action_probs = self.defender_policy_network(state).squeeze()
             # Set probability of non-legal actions to 0
             action_probs_1 = action_probs.clone()
-            # print("state shape:{}".format(state.shape))
-            # print("action shape:{}".format(action_probs_1.shape))
             if len(legal_actions) > 0 and len(non_legal_actions) < self.env.num_defense_actions:
                 action_probs_1[non_legal_actions] = 0
 
@@ -190,68 +213,29 @@ class BayesReinforceAgent(PolicyGradientAgent):
         # reparameterization trick
 
         #action_probs_1 /= torch.sum(action_probs_1)
+        uniform = action_probs.clone()
+        #uniform = torch.Tensor([1/action_probs_1.size()[0] for _ in range(action_probs_1.size()[0])])
+        if len(legal_actions) > 0 and len(non_legal_actions) < self.env.num_attack_actions:
+            uniform[non_legal_actions] = 0
+            uniform[legal_actions] = 1/action_probs_1.size()[0]
+        else:
+            uniform[:] = 1 / action_probs_1.size()[0]
 
-        #print('action probs 1', action_probs_1)
-        #print('sum of probs', torch.sum(action_probs_1))
+        #uniform /= torch.sum(uniform)
 
-        policy_dist = Categorical(action_probs_1)
-
-        #print('policy_dist', policy_dist)
-
-        # Sample an action from the probability distribution
-        try:
-            '''
-            if (np.random.random() < self.config.epsilon and not eval) \
-                    or (eval and np.random.random() < self.config.eval_epsilon):
-                #aux = np.array(np.random.choice(legal_actions))
-                action = torch.multinomial(legal_actions, num_samples=1)
-                #print('action', action)
-                #print(aux)
-                #action = Variable(torch.from_numpy(aux), requires_grad=True) #.type(torch.LongTensor)
-                if torch.cuda.is_available() and self.config.gpu:
-                    device = torch.device("cuda:" + str(self.config.gpu_id))
-                    action = action.to(device)
-                #action = torch.multinomial(legal_actions, num_samples=1)
-                #action2 = policy_dist.sample()
-                #print('')
-                #print(action)
-                #print(action2)
-            else:
-            '''
+        if np.random.rand() < self.config.epsilon:
+            policy_dist = Categorical(uniform)
             action = policy_dist.sample()
+            log_prob = policy_dist.log_prob(action)
 
-        except Exception as e:
-            print("Nan values in distribution, consider using a lower learnign rate or gradient clipping")
-            print("legal actions: {}".format(legal_actions))
-            print("non_legal actions: {}".format(non_legal_actions))
-            print("action_probs: {}".format(action_probs))
-            print("action_probs_1: {}".format(action_probs_1))
-            print("state: {}".format(state))
-            print("policy_dist: {}".format(policy_dist))
-            action = torch.tensor(0).type(torch.LongTensor)
+        else:
+            policy_dist = Categorical(action_probs_1)
+            action = policy_dist.sample()
+            log_prob = policy_dist.log_prob(action)
 
-        # log_prob returns the log of the probability density/mass function evaluated at value.
-        # save the log_prob as it will use later on for computing the policy gradient
-        # policy gradient theorem says that the stochastic gradient of the expected return of the current policy is
-        # the log gradient of the policy times the expected return, therefore we save the log of the policy distribution
-        # now and use it later to compute the gradient once the episode has finished.
-
-        #print('action', action)
-
-        log_prob = policy_dist.log_prob(action)
-
-        #print(log_prob)
-
-        #log_prob.backward(retain_graph=True)
-        #print('log_prob', log_prob)
         log_prob.backward()
         i = 0
         for param in self.attacker_policy_network.parameters():
-
-            #print('')
-            #print('CHECK OVER GRADS')
-            #print(param.grad.data)
-
             if i == 0:
                 i = 1
                 if param.grad is not None:
@@ -297,7 +281,7 @@ class BayesReinforceAgent(PolicyGradientAgent):
 
 
             if len(R) > 1:
-                returns = ( returns - returns.mean() )  #/ ( returns.std() + self.machine_eps )
+                returns = ( returns - returns.mean() )  / ( returns.std() + self.machine_eps )
 
 
             #policy_loss0 = self.BPG_step(X, logP, returns, Ginv, model_type, Cinv)
@@ -316,15 +300,12 @@ class BayesReinforceAgent(PolicyGradientAgent):
         with torch.no_grad():
             i = 0
             for param in self.attacker_policy_network.parameters():
-                tochange = param.data.flatten()
-                aux = tochange.size()[0]
-
+                tochange     = param.data.flatten()
+                aux          = tochange.size()[0]
                 prepare_grad = Post_mean2[i:aux + i, 0]
-
-                i += aux
-                tochange += self.config.alpha_attacker * prepare_grad
-
-                param.data = torch.clone(tochange.reshape(param.data.shape))
+                i           += aux
+                tochange    += self.config.alpha_attacker * prepare_grad
+                param.data   = torch.clone(tochange.reshape(param.data.shape))
 
 
         # Compute gradient and update models
@@ -353,6 +334,8 @@ class BayesReinforceAgent(PolicyGradientAgent):
 
 
     def train(self) -> ExperimentResult:
+
+        training_time_start = time.time()
 
         """
         Runs the REINFORCE algorithm
@@ -392,19 +375,10 @@ class BayesReinforceAgent(PolicyGradientAgent):
         saved_defender_log_probs_batch = []
         saved_defender_rewards_batch = []
 
-        nu00 = 0.1 # 0.01
-
-
         # Training
         for iter in range(self.config.num_episodes):
-            nu0 = nu00
-            flag0 = True
-            M = self.M
-            sig2 = 100
-
+            episode_time_start = time.time()
             Ginv = None
-
-
 
             saved_grads_batch = []
             post_mean_batch = []
@@ -415,8 +389,7 @@ class BayesReinforceAgent(PolicyGradientAgent):
                 R = []
                 prior_accum = 0
 
-                for m in range(M):
-
+                for m in range(self.M):
                     episode_attacker_reward = 0
                     episode_defender_reward = 0
                     episode_step = 0
@@ -428,13 +401,11 @@ class BayesReinforceAgent(PolicyGradientAgent):
                     saved_defender_rewards = []
 
                     saved_grads = []
-
                     prior_rewards = []
 
                     while not done:
                         if self.config.render:
                             self.env.render(mode="human")
-
                         if not self.config.attacker and not self.config.defender:
                             raise AssertionError("Must specify whether training an attacker agent or defender agent")
 
@@ -451,19 +422,13 @@ class BayesReinforceAgent(PolicyGradientAgent):
                             attacker_action, attacker_log_prob, _grads = self.get_action(attacker_state, attacker=True,
                                                                                  legal_actions=legal_actions,
                                                                                  non_legal_actions=illegal_actions)
-
                             if self.env.local_view_features():
                                 attacker_action = PolicyGradientAgent.convert_local_attacker_action_to_global(attacker_action, attacker_obs)
                             saved_attacker_log_probs.append(attacker_log_prob)
 
-
-
-
                         if self.config.defender:
                             defender_action, defender_log_prob, _grads = self.get_action(defender_state, attacker=False)
                             saved_defender_log_probs.append(defender_log_prob)
-
-
 
                         action = (attacker_action, defender_action)
 
@@ -475,15 +440,23 @@ class BayesReinforceAgent(PolicyGradientAgent):
                             if self.prior_type == 2:
                                 prior_reward = self.env.prior2(action)
 
+                            if self.prior_type == 3:
+                                # For reconnaissance case
+                                prior_reward = self.env.rec_prior_2(action)
 
-                        prior_rewards.append(prior_reward)
+                            if self.prior_type == 4:
+                                #random prior
+                                prior_reward = self.env.random_prior()
+
+                            if self.prior_type == 5:
+                                #minimal distance prior - for reconnaissance case
+                                prior_reward = self.env.rec_mindist_prior_2(action)
+
+                            #print(prior_reward)
+                            prior_rewards.append(prior_reward)
 
                         # Take a step in the environment
                         obs_prime, reward, done, _ = self.env.step(action)
-
-
-
-
 
                         # Update metrics
                         attacker_reward, defender_reward = reward
@@ -517,19 +490,6 @@ class BayesReinforceAgent(PolicyGradientAgent):
 
                     R.append(episode_attacker_reward)
                     saved_grads_batch.append(saved_grads)
-
-                    '''
-                    print('')
-                    print('R', R)
-                    print('saved_attacker_rewards', saved_attacker_rewards)
-                    '''
-                    '''
-                    print('prior rewards', prior_rewards)
-                    print('sum prior rewards', sum(prior_rewards))
-                    print('reward', saved_attacker_rewards)
-                    print('sum reward', sum(saved_attacker_rewards))
-                    print('')
-                    '''
 
                     if m == 0:
                         uz1 = torch.stack(saved_grads_batch[0], dim=0).sum(dim=0).reshape(-1, 1)
@@ -576,10 +536,24 @@ class BayesReinforceAgent(PolicyGradientAgent):
                     defender_state = self.update_state(defender_obs=defender_obs, attacker_obs=attacker_obs, state=[],
                                                        attacker=False)
 
+                    if torch.cuda.is_available() and self.config.gpu:
+                        device = torch.device("cuda:" + str(self.config.gpu_id))
+                        prior = prior.to(device)
+
                     prior_accum += prior*sum(saved_attacker_log_probs)
 
-                Post_mean = prior_accum/M + (Z @ Y.T)
+                Entropy = -(torch.stack(saved_attacker_log_probs).reshape(1,-1) + 1) @ torch.stack(saved_grads)
+
+                #print('')
+                #print(Entropy)
+
+                Post_mean = prior_accum/self.M + (Z @ Y.T) + self.entropy_reg*Entropy.reshape(-1,1)
                 post_mean_batch.append(Post_mean)
+
+            #self.tensorboard_writer.add_scalar('Entropy/train/', Entropy, iter)
+
+            # Exploration Decay
+            self.config.epsilon *= max(self.config.epsilon_decay**iter, self.config.min_epsilon)
 
             # Decay LR after every iteration
             lr_attacker = self.config.alpha_attacker
@@ -679,6 +653,11 @@ class BayesReinforceAgent(PolicyGradientAgent):
 
             # Anneal epsilon linearly
             self.anneal_epsilon()
+
+            episode_time_end = time.time()
+
+            self.tensorboard_writer.add_scalar('work_time/train/', episode_time_end - episode_time_start, iter)
+            self.tensorboard_writer.add_scalar('cumulative_work_time/train/', time.time() - training_time_start, iter)
 
         self.config.logger.info("Training Complete")
 
@@ -900,16 +879,12 @@ class BayesReinforceAgent(PolicyGradientAgent):
         uzj = torch.stack(last_grad, dim=0).sum(dim=0).reshape(-1, 1)
         for t in range(len(grad_dict)):
             uzi = torch.stack(grad_dict[t], dim=0).sum(dim=0).reshape(-1, 1)
-            #print('hihi')
-            #print(torch.linalg.norm(uzi - uzj) / (100))
-            k[t, 0] = 1/(1 + torch.linalg.norm(uzi - uzj) / (10))
+            k[t, 0] = self.Kernel(uzi, uzj)
             #k[t, 0] = uzi.T @ uzj
-            #print(k[t, 0])
-
 
         a = Kprev_inv @ k
         #ktt = uzj.T @ uzj
-        ktt = 1/(1 + torch.linalg.norm(uzj - uzj) / 100)
+        ktt = self.Kernel(uzj, uzj)
 
         delta = ktt - k.T @ a
         self.tensorboard_writer.add_scalar('delta/train/attacker', delta, self.config.batch_size*iter*max_episode + episode + batch)
@@ -960,6 +935,22 @@ class BayesReinforceAgent(PolicyGradientAgent):
 
         return Post_mean, K, Kinv, flag_dictionary, yM, zM, A, C_inv
 
+
+    def Kernel(self, x, y):
+        if self.kernel_type == "Cauchy":
+            k = 1 / (1 + torch.linalg.norm(x - y) / (self.kernel_var))
+        if self.kernel_type == "Fisher2":
+            k = x.T @ y
+        if self.kernel_type == "Gaussian":
+            k = np.exp(-((x-y)**2)/(2*self.kernel_var))
+        if self.kernel_type == "Linear":
+            k = 0 # implement this
+        if self.kernel_type == "Polynomial":
+            k = 0 # implement this
+        return k
+
+    def Normalize_Kernel(self):
+        return 0
 
 
 '''
